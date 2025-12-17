@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TenderFinder - Поиск выгодных госзакупок</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes gradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .animated-gradient {
+            background: linear-gradient(-45deg, #0f172a, #581c87, #0f172a, #6b21a8);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+        }
+    </style>
+</head>
+<body class="animated-gradient min-h-screen">
+    <div id="app"></div>
+
+    <script>
+        const API_URL = window.location.origin + '/api';
+        
+        const fmt = (n) => new Intl.NumberFormat('ru-RU').format(n);
+        const fmtShort = (n) => n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(0)}K` : fmt(n);
+
+        class App {
+            constructor() {
+                this.page = 'home';
+                this.lots = [];
+                this.categories = [];
+                this.stats = null;
+                this.loading = false;
+                this.search = '';
+                this.category = '';
+                this.budgetInput = '';
+                this.marginInput = '';
+                this.calcResults = null;
+                this.product = null;
+                
+                this.init();
+            }
+
+            async init() {
+                await this.loadCategories();
+                await this.loadStats();
+                this.render();
+            }
+
+            async loadCategories() {
+                const res = await fetch(`${API_URL}/categories`);
+                const data = await res.json();
+                this.categories = data.categories;
+            }
+
+            async loadStats() {
+                const res = await fetch(`${API_URL}/stats`);
+                this.stats = await res.json();
+                this.render();
+            }
+
+            async searchByBudget() {
+                this.loading = true;
+                this.render();
+                const res = await fetch(`${API_URL}/lots/search-by-budget`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ budget: parseFloat(this.budgetInput) })
+                });
+                this.calcResults = await res.json();
+                this.loading = false;
+                this.render();
+            }
+
+            async searchByMargin() {
+                this.loading = true;
+                this.render();
+                const res = await fetch(`${API_URL}/lots/search-by-margin`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_margin: parseFloat(this.marginInput) })
+                });
+                this.calcResults = await res.json();
+                this.loading = false;
+                this.render();
+            }
+
+            async loadCatalog() {
+                this.loading = true;
+                this.render();
+                const params = new URLSearchParams({ limit: 100 });
+                if (this.category) params.append('category', this.category);
+                if (this.search) params.append('search', this.search);
+                const res = await fetch(`${API_URL}/lots?${params}`);
+                const data = await res.json();
+                this.lots = data.results;
+                this.loading = false;
+                this.render();
+            }
+
+            async viewProduct(id) {
+                this.loading = true;
+                this.render();
+                const res = await fetch(`${API_URL}/lots/${id}`);
+                this.product = await res.json();
+                this.page = 'product';
+                this.loading = false;
+                this.render();
+            }
+
+            setPage(page) {
+                this.page = page;
+                this.calcResults = null;
+                if (page === 'catalog') this.loadCatalog();
+                this.render();
+            }
+
+            render() {
+                const app = document.getElementById('app');
+                app.innerHTML = `
+                    <nav class="bg-black/30 backdrop-blur border-b border-white/10">
+                        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center font-bold text-xl text-white">T</div>
+                                <span class="font-bold text-xl text-white">TenderFinder</span>
+                            </div>
+                            <div class="flex gap-4">
+                                <button onclick="app.setPage('home')" class="px-4 py-2 text-white/80 hover:text-white transition">Главная</button>
+                                <button onclick="app.setPage('catalog')" class="px-4 py-2 text-white/80 hover:text-white transition">Каталог</button>
+                            </div>
+                        </div>
+                    </nav>
+                    ${this.renderPage()}
+                `;
+            }
+
+            renderPage() {
+                if (this.page === 'home') return this.renderHome();
+                if (this.page === 'catalog') return this.renderCatalog();
+                if (this.page === 'product') return this.renderProduct();
+                return '';
+            }
+
+            renderHome() {
+                return `
+                    <div class="max-w-7xl mx-auto px-4 py-12">
+                        <div class="text-center mb-16">
+                            <h1 class="text-5xl font-bold text-white mb-4">
+                                Найдите выгодные госзакупки
+                            </h1>
+                            <p class="text-xl text-white/60 max-w-2xl mx-auto">
+                                Автоматический расчёт прибыли и ROI для тендеров Казахстана
+                            </p>
+                        </div>
+
+                        ${this.stats ? `
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20">
+                                <div class="text-white/60 text-sm mb-1">Всего лотов</div>
+                                <div class="text-3xl font-bold text-white">${this.stats.total_lots}</div>
+                            </div>
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20">
+                                <div class="text-white/60 text-sm mb-1">Общая сумма</div>
+                                <div class="text-3xl font-bold text-white">${fmtShort(this.stats.total_sum)}₸</div>
+                            </div>
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20">
+                                <div class="text-white/60 text-sm mb-1">Средняя маржа</div>
+                                <div class="text-3xl font-bold text-emerald-400">${this.stats.avg_margin}%</div>
+                            </div>
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20">
+                                <div class="text-white/60 text-sm mb-1">Горячие лоты</div>
+                                <div class="text-3xl font-bold text-orange-400">${this.stats.hot_deals}</div>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        <div class="grid md:grid-cols-2 gap-8 mb-12">
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+                                <h3 class="text-2xl font-bold text-white mb-4">💰 Поиск по бюджету</h3>
+                                <p class="text-white/60 mb-6">Найдите лоты под ваш бюджет</p>
+                                <input
+                                    type="number"
+                                    placeholder="Введите бюджет (₸)"
+                                    value="${this.budgetInput}"
+                                    oninput="app.budgetInput = this.value"
+                                    class="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl text-white placeholder-white/40 mb-4"
+                                />
+                                <button
+                                    onclick="app.searchByBudget()"
+                                    ${this.loading ? 'disabled' : ''}
+                                    class="w-full px-6 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-medium hover:from-violet-700 hover:to-purple-700 disabled:opacity-50 transition"
+                                >
+                                    ${this.loading ? 'Поиск...' : 'Найти лоты'}
+                                </button>
+                            </div>
+
+                            <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+                                <h3 class="text-2xl font-bold text-white mb-4">📈 Поиск по марже</h3>
+                                <p class="text-white/60 mb-6">Найдите лоты с нужной прибылью</p>
+                                <input
+                                    type="number"
+                                    placeholder="Желаемая прибыль (₸)"
+                                    value="${this.marginInput}"
+                                    oninput="app.marginInput = this.value"
+                                    class="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl text-white placeholder-white/40 mb-4"
+                                />
+                                <button
+                                    onclick="app.searchByMargin()"
+                                    ${this.loading ? 'disabled' : ''}
+                                    class="w-full px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-medium hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 transition"
+                                >
+                                    ${this.loading ? 'Поиск...' : 'Найти лоты'}
+                                </button>
+                            </div>
+                        </div>
+
+                        ${this.calcResults ? `
+                        <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+                            <h3 class="text-2xl font-bold text-white mb-6">Результаты поиска: ${this.calcResults.total} лотов</h3>
+                            <div class="grid gap-4">
+                                ${this.calcResults.results.slice(0, 10).map((lot, i) => `
+                                <div onclick="app.viewProduct(${lot.id})" class="bg-white/5 rounded-xl p-6 border border-white/10 hover:border-violet-500/50 cursor-pointer transition">
+                                    <div class="flex justify-between items-start mb-3">
+                                        <div class="flex-1">
+                                            <h4 class="text-white font-medium mb-1">${lot.simplified_name || lot.original_name}</h4>
+                                            <div class="text-white/60 text-sm">${lot.lot_number}</div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-2xl font-bold text-emerald-400">${fmt(lot.stats.profit)}₸</div>
+                                            <div class="text-white/60 text-sm">прибыль</div>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-4 text-sm">
+                                        <div>
+                                            <div class="text-white/40">ROI</div>
+                                            <div class="text-white font-medium">${lot.stats.roi}%</div>
+                                        </div>
+                                        <div>
+                                            <div class="text-white/40">Себестоимость</div>
+                                            <div class="text-white font-medium">${fmt(lot.stats.total_expense)}₸</div>
+                                        </div>
+                                        <div>
+                                            <div class="text-white/40">Маржа</div>
+                                            <div class="text-white font-medium">${lot.stats.margin_percent}%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            renderCatalog() {
+                return `
+                    <div class="max-w-7xl mx-auto px-4 py-12">
+                        <h2 class="text-3xl font-bold text-white mb-8">Каталог лотов</h2>
+                        
+                        <div class="flex gap-4 mb-8">
+                            <input
+                                type="text"
+                                placeholder="Поиск..."
+                                value="${this.search}"
+                                oninput="app.search = this.value"
+                                onkeypress="if(event.key==='Enter') app.loadCatalog()"
+                                class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40"
+                            />
+                            <select
+                                value="${this.category}"
+                                onchange="app.category = this.value; app.loadCatalog()"
+                                class="px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white"
+                            >
+                                <option value="">Все категории</option>
+                                ${this.categories.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                            </select>
+                            <button
+                                onclick="app.loadCatalog()"
+                                class="px-6 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-medium hover:from-violet-700 hover:to-purple-700 transition"
+                            >
+                                Поиск
+                            </button>
+                        </div>
+
+                        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${this.lots.map(lot => `
+                            <div onclick="app.viewProduct(${lot.id})" class="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20 hover:border-violet-500/50 cursor-pointer transition">
+                                <h3 class="text-white font-medium mb-2 line-clamp-2 h-12">${lot.simplified_name || lot.original_name}</h3>
+                                <div class="text-white/60 text-sm mb-4">${lot.category || 'Без категории'}</div>
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <div class="text-white/40 text-xs">Тендерная цена</div>
+                                        <div class="text-white font-bold">${fmt(lot.tender_price)}₸</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-white/40 text-xs">Количество</div>
+                                        <div class="text-white font-bold">${lot.quantity}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderProduct() {
+                if (!this.product) return '';
+                
+                return `
+                    <div class="max-w-4xl mx-auto px-4 py-12">
+                        <button onclick="app.setPage('catalog')" class="text-white/60 hover:text-white mb-6 transition">← Назад</button>
+                        
+                        <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20 mb-6">
+                            <h2 class="text-3xl font-bold text-white mb-2">${this.product.simplified_name || this.product.original_name}</h2>
+                            <div class="text-white/60 mb-4">${this.product.lot_number}</div>
+                            <div class="inline-block px-3 py-1 bg-violet-500/20 text-violet-300 rounded-full text-sm">${this.product.category || 'Без категории'}</div>
+                        </div>
+
+                        ${this.product.stats ? `
+                        <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+                            <h3 class="text-2xl font-bold text-white mb-6">Финансовая аналитика</h3>
+                            <div class="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">Закупка</div>
+                                    <div class="text-2xl font-bold text-white">${fmt(this.product.stats.total_cost)}₸</div>
+                                </div>
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">Доставка</div>
+                                    <div class="text-2xl font-bold text-white">${fmt(this.product.stats.delivery_cost)}₸</div>
+                                </div>
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">Себестоимость</div>
+                                    <div class="text-2xl font-bold text-orange-400">${fmt(this.product.stats.total_expense)}₸</div>
+                                </div>
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">Выручка</div>
+                                    <div class="text-2xl font-bold text-blue-400">${fmt(this.product.stats.revenue)}₸</div>
+                                </div>
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">Прибыль</div>
+                                    <div class="text-3xl font-bold text-emerald-400">${fmt(this.product.stats.profit)}₸</div>
+                                </div>
+                                <div>
+                                    <div class="text-white/40 text-sm mb-1">ROI</div>
+                                    <div class="text-3xl font-bold text-purple-400">${this.product.stats.roi}%</div>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+        }
+
+        const app = new App();
+    </script>
+</body>
+</html>
